@@ -1,76 +1,66 @@
-import os 
-import time 
-from pathlib import Path 
+import os
+import time
+from pathlib import Path
 
-import fire 
-import torch 
-import torch.nn as nn 
-from torch.amp import GradScaler 
+import fire
+import torch
+import torch.nn as nn
+import wandb
+from dataset import ImageDataset, get_train_transforms, get_val_transforms
+from engine import train_epoch
+from eval import LinearProbe, evaluate_linear_probe
+from lars import LARS
+from log_utils import get_logger
+from losses import BCS, VICRegLoss
+from model import ImageSSL, ResNet18
+from omegaconf import OmegaConf
+from scheduler import WarmupCosineScheduler
+from torch.amp import GradScaler
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10, CIFAR100
 from torchvision.models import VisionTransformer
-import wandb
-from omegaconf import OmegaConf
-
-from model import ResNet18,ImageSSL
-from lars import LARS
-from scheduler import WarmupCosineScheduler
-from log_utils import get_logger
 from training_utils import (
     get_default_dev_name,
-    load_config,
     get_exp_name,
     get_unified_experiment_dir,
     load_checkpoint,
+    load_config,
+    log_config,
     log_data_info,
     log_epoch,
     log_model_info,
-    log_config,
     save_checkpoint,
     setup_device,
     setup_seed,
     setup_wandb,
-
 )
-from dataset import (
-    ImageDataset,
-    get_train_transforms,
-    get_val_transforms
-)
-from losses import VICRegLoss, BCS
-from engine import train_epoch
-from eval import LinearProbe, evaluate_linear_probe
 
 logger = get_logger(__name__)
 
 # cfg.data.dataset -> (dataset class, display name, num classes)
 DATASETS = {
     "cifar10": (CIFAR10, "CIFAR-10", 10),
-    "cifar100": (CIFAR100, "CIFAR-100", 100),   # fine labels (torchvision default)
+    "cifar100": (CIFAR100, "CIFAR-100", 100),  # fine labels (torchvision default)
 }
 
-def run(
-        fname: str = "cfgs/default.yaml",
-        cfg = None,
-        folder = None,
-        **overrides
-):
+
+def run(fname: str = "cfgs/default.yaml", cfg=None, folder=None, **overrides):
     """
     Train an Image JEPA (VICReg/BCS) model on CIFAR-10 or CIFAR-100
 
-    Args: 
-        fname: Path to YAML config file 
+    Args:
+        fname: Path to YAML config file
         cfg: Pre-loaded config object (optional, overrides config file)
         folder: Experiment folder path (optional, auto-generated if not provided)
         **overrides: Config overrides in dot notation (e.g., optim.epochs=50)
-    
-    """ 
 
-    # Load config 
+    """
+
+    # Load config
     if cfg is None:
-        cfg = load_config(fname,overrides if overrides else None)
+        cfg = load_config(fname, overrides if overrides else None)
 
-    # Setup using shared utilities 
+    # Setup using shared utilities
     device = setup_device(cfg.meta.device)
     setup_seed(cfg.meta.seed)
 
@@ -78,34 +68,34 @@ def run(
     if folder is None:
         if cfg.meta.get("model_folder"):
             exp_dir = Path(cfg.meta.model_folder)
-            folder_name = exp_dir.name 
-            exp_name = folder_name.rsplit("_seed",1)[0]
+            folder_name = exp_dir.name
+            exp_name = folder_name.rsplit("_seed", 1)[0]
         else:
             sweep_name = get_default_dev_name()
-            exp_name = get_exp_name("image_jepa",cfg)
+            exp_name = get_exp_name("image_jepa", cfg)
             exp_dir = get_unified_experiment_dir(
-                example_name = "image_jepa",
+                example_name="image_jepa",
                 sweep_name=sweep_name,
                 exp_name=exp_name,
-                seed=cfg.meta.seed
+                seed=cfg.meta.seed,
             )
 
     else:
         exp_dir = Path(folder)
-        exp_dir.mkdir(parents=True,exist_ok=True)
+        exp_dir.mkdir(parents=True, exist_ok=True)
         # Extract exp_name from folder name by removing _seed{seed} suffix
         folder_name = exp_dir.name  # e.g. "resnet_vicreg_seed1"
-        exp_name = folder_name.rsplit("_seed", 1)[0] # e.g., "resnet_vicreg"
+        exp_name = folder_name.rsplit("_seed", 1)[0]  # e.g., "resnet_vicreg"
 
     wandb_run = setup_wandb(
-        project= "eb_jepa",
+        project="eb_jepa",
         config={"example": "image_jepa", **OmegaConf.to_container(cfg, resolve=True)},
-        run_dir= exp_dir,
+        run_dir=exp_dir,
         run_name=exp_name,
         tags=["image_jepa", f"seed_{cfg.meta.seed}"],
         group=cfg.logging.get("wandb_group"),
-        enabled= cfg.logging.log_wandb,
-        sweep_id=cfg.logging.get("wandb_sweep_id")
+        enabled=cfg.logging.log_wandb,
+        sweep_id=cfg.logging.get("wandb_sweep_id"),
     )
 
     dataset_cls, dataset_name, num_classes = DATASETS[cfg.data.dataset]
@@ -123,7 +113,10 @@ def run(
     train_dataset = ImageDataset(base_train_dataset, transform, num_crops=2)
 
     val_dataset = dataset_cls(
-        root=data_dir, train=False, download=True, transform=get_val_transforms(cfg.data.dataset)
+        root=data_dir,
+        train=False,
+        download=True,
+        transform=get_val_transforms(cfg.data.dataset),
     )
 
     train_loader = DataLoader(
@@ -132,15 +125,15 @@ def run(
         shuffle=True,
         num_workers=cfg.data.num_workers,
         pin_memory=True,
-        drop_last=True  # Avoid small batches that cause BatchNorm issues
+        drop_last=True,  # Avoid small batches that cause BatchNorm issues
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.data.batch_size,
         shuffle=False,
-        num_workers= cfg.data.num_workers,
-        pin_memory=True
+        num_workers=cfg.data.num_workers,
+        pin_memory=True,
     )
 
     log_data_info(
@@ -148,7 +141,7 @@ def run(
         len(train_loader),
         cfg.data.batch_size,
         train_samples=len(train_dataset),
-        val_samples=len(val_dataset)
+        val_samples=len(val_dataset),
     )
 
     # Initialize model
@@ -164,7 +157,7 @@ def run(
             hidden_dim=features_dim,
             num_layers=12,
             num_heads=6,
-            mlp_dim=4 * features_dim
+            mlp_dim=4 * features_dim,
         )
         backbone = VisionTransformer(**model_kwargs)
         backbone.heads = nn.Identity()
@@ -176,7 +169,7 @@ def run(
             hidden_dim=features_dim,
             num_layers=12,
             num_heads=12,
-            mlp_dim= 4 * features_dim
+            mlp_dim=4 * features_dim,
         )
         backbone = VisionTransformer(**model_kwargs)
         backbone.heads = nn.Identity()
@@ -185,7 +178,7 @@ def run(
         backbone,
         features_dim=features_dim,
         proj_hidden_dim=cfg.model.proj_hidden_dim,
-        proj_output_dim=cfg.model.proj_output_dim
+        proj_output_dim=cfg.model.proj_output_dim,
     )
 
     if not cfg.model.use_projector:
@@ -198,33 +191,35 @@ def run(
     projector_params = (
         sum(p.numel() for p in model.projector.parameters())
         if cfg.model.use_projector
-        else 0 
+        else 0
     )
     log_model_info(model, {"encoder": encoder_params, "projector": projector_params})
 
     # Log Configuration
     log_config(cfg)
 
-    # Initialize Linear probe 
-    linear_probe = LinearProbe(feature_dim=features_dim,num_classes=num_classes).to(device)
+    # Initialize Linear probe
+    linear_probe = LinearProbe(feature_dim=features_dim, num_classes=num_classes).to(
+        device
+    )
 
-    # Mixed precision setup 
-    dtype_map = {"bfloat16": torch.bfloat16, "float16":torch.float16}
-    use_amp = cfg.training.get("use_amp",True)
-    dtype = dtype_map.get(cfg.training.get("dtype","float16").lower(), torch.float16)
+    # Mixed precision setup
+    dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
+    use_amp = cfg.training.get("use_amp", True)
+    dtype = dtype_map.get(cfg.training.get("dtype", "float16").lower(), torch.float16)
     scaler = GradScaler(device.type, enabled=use_amp)
     logger.info(f"Using AMP with {dtype=}" if use_amp else f"AMP disabled")
 
     optimizer = LARS(
         [
-            {"params": model.parameters(),"lr":cfg.optim.lr},   # 0.3
-            {"params": linear_probe.parameters(),"lr":0.1}
+            {"params": model.parameters(), "lr": cfg.optim.lr},  # 0.3
+            {"params": linear_probe.parameters(), "lr": 0.1},
         ],
-        weight_decay=cfg.optim.weight_decay,    # 1.0e-4
-        eta= 0.02,
+        weight_decay=cfg.optim.weight_decay,  # 1.0e-4
+        eta=0.02,
         clip_lr=True,
         exclude_bias_n_norm=True,
-        momentum=0.9
+        momentum=0.9,
     )
 
     scheduler = WarmupCosineScheduler(
@@ -233,7 +228,7 @@ def run(
         max_epochs=cfg.optim.epochs,
         base_lr=cfg.optim.lr,
         min_lr=cfg.optim.min_lr,
-        warmup_start_lr=cfg.optim.warmup_start_lr
+        warmup_start_lr=cfg.optim.warmup_start_lr,
     )
 
     # Initialize loss function
@@ -241,27 +236,27 @@ def run(
         loss_fn = VICRegLoss(
             hinge=cfg.loss.hinge,
             hinge_coeff=cfg.loss.hinge_coeff,
-            cov_coeff=cfg.loss.cov_coeff
+            cov_coeff=cfg.loss.cov_coeff,
         )
     elif cfg.loss.type == "bcs":
         loss_fn = BCS(lmbd=cfg.loss.lmbd)
 
-    
-    # Load checkpoint if requested 
-    start_epoch = 0 
+    # Load checkpoint if requested
+    start_epoch = 0
     if cfg.meta.get("load_model"):
         ckpt_path = exp_dir / cfg.meta.get("load_checkpoint", "latest.pth.tar")
-        ckpt_info = load_checkpoint(ckpt_path,model,optimizer,device= device)
-        start_epoch = ckpt_info.get("epoch",0)
+        ckpt_info = load_checkpoint(ckpt_path, model, optimizer, device=device)
+        start_epoch = ckpt_info.get("epoch", 0)
         if "linear_probe_state_dict" in ckpt_info:
             linear_probe.load_state_dict(ckpt_info["linear_probe_state_dict"])
-    
 
     # Fixed monitor batch (256) for tracking encoder + projector embeddings across epochs.
     # Always drawn, even with save_embeddings=false: drawing it consumes the RNG, so
     # skipping it would change every later random draw and break seed reproducibility.
     save_embeddings = cfg.logging.get("save_embeddings", True)
-    monitor_loader = DataLoader(train_dataset, batch_size=256, shuffle=False, num_workers=0)
+    monitor_loader = DataLoader(
+        train_dataset, batch_size=256, shuffle=False, num_workers=0
+    )
     monitor_views, _ = next(iter(monitor_loader))
     monitor_v1 = monitor_views[0].to(device)
     monitor_v2 = monitor_views[1].to(device)
@@ -274,7 +269,7 @@ def run(
     tqdm_silent = cfg.logging.get("tqdm_silent", False)
 
     for epoch in range(start_epoch, cfg.optim.epochs):
-        # Train 
+        # Train
         train_metrics = train_epoch(
             model,
             train_loader,
@@ -287,7 +282,7 @@ def run(
             loss_fn,
             use_amp,
             dtype,
-            tqdm_silent
+            tqdm_silent,
         )
 
         # Evaluate linear probe on validation set
@@ -310,7 +305,7 @@ def run(
         # Log metrics - dynamically add train_prefix to all train_metrics keys
         log_dict = {"epoch": epoch}
         for key, value in train_metrics.items():
-            log_dict[f'train_{key}'] = value 
+            log_dict[f"train_{key}"] = value
         log_dict["val_loss"] = val_loss
         log_dict["val_acc"] = val_acc
         log_dict["learning_rate"] = optimizer.param_groups[0]["lr"]
@@ -318,7 +313,7 @@ def run(
         if wandb_run:
             wandb.log(log_dict)
 
-        # Log progress 
+        # Log progress
         if epoch % cfg.logging.log_every == 0:
             elapsed = time.time() - start_time
             log_epoch(
@@ -329,18 +324,18 @@ def run(
                     "lr": optimizer.param_groups[0]["lr"],
                 },
                 total_epochs=cfg.optim.epochs,
-                elapsed_time=elapsed
+                elapsed_time=elapsed,
             )
-        
+
         # Save checkpoint
         save_checkpoint(
             exp_dir / "latest.pth.tar",
-            model = model,
+            model=model,
             optimizer=optimizer,
             epoch=epoch,
             scaler=scaler,
             linear_probe_state_dict=linear_probe.state_dict(),
-            linear_val_acc=val_acc
+            linear_val_acc=val_acc,
         )
         if epoch % cfg.logging.save_every == 0 and epoch > 0:
             save_checkpoint(
@@ -350,7 +345,7 @@ def run(
                 epoch=epoch,
                 scaler=scaler,
                 linear_probe_state_dict=linear_probe.state_dict(),
-                linear_val_acc=val_acc
+                linear_val_acc=val_acc,
             )
 
     logger.info("Training completed!")

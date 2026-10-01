@@ -1,16 +1,15 @@
-import os 
-import random 
+import os
+import random
 from datetime import datetime
-from pathlib import Path 
-from typing import Union,Optional,Dict,Any,List
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
-import numpy as np 
+import numpy as np
 import torch
-import torch.nn as nn 
+import torch.nn as nn
 import torch.optim as optim
-from omegaconf import DictConfig,OmegaConf
-
 from log_utils import get_logger
+from omegaconf import DictConfig, OmegaConf
 
 logger = get_logger(__name__)
 
@@ -148,18 +147,18 @@ def get_default_dev_name() -> str:
 
 
 def save_checkpoint(
-        path: Union[str, Path],
-        model: nn.Module,
-        optimizer: Optional[optim.Optimizer] = None,
-        scheduler: Optional[Any] = None,
-        epoch: int = 0,
-        step: int = 0,
-        scaler: Optional[Any] = None,
-        **extra_state,
-) -> None: 
+    path: Union[str, Path],
+    model: nn.Module,
+    optimizer: Optional[optim.Optimizer] = None,
+    scheduler: Optional[Any] = None,
+    epoch: int = 0,
+    step: int = 0,
+    scaler: Optional[Any] = None,
+    **extra_state,
+) -> None:
     """Save a training checkpoint (model, optimizer, scheduler, scaler, extra_state)."""
     path = Path(path)
-    path.parent.mkdir(parents=True,exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     checkpoint = {
         "epoch": epoch,
@@ -167,7 +166,7 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
     }
 
-    if optimizer is not None: 
+    if optimizer is not None:
         checkpoint["optimizer_state_dict"] = optimizer.state_dict()
     if scheduler is not None:
         checkpoint["scheduler_state_dict"] = scheduler.state_dict()
@@ -181,31 +180,31 @@ def save_checkpoint(
 
 
 def load_checkpoint(
-        path: Union[str, Path],
-        model: nn.Module,
-        optimizer: Optional[optim.Optimizer] = None,
-        scheduler: Optional[Any] = None,
-        scaler: Optional[Any] = None,
-        device: Optional[torch.device] = None,
-        strict: bool = True,
-) -> Dict[str,Any]:
+    path: Union[str, Path],
+    model: nn.Module,
+    optimizer: Optional[optim.Optimizer] = None,
+    scheduler: Optional[Any] = None,
+    scaler: Optional[Any] = None,
+    device: Optional[torch.device] = None,
+    strict: bool = True,
+) -> Dict[str, Any]:
     """Load a training checkpoint. Returns dict with epoch, step, and extra_state.
-    
+
     The returned 'epoch' is the epoch to resume training from (0-indexed).
-    If no checkpoint exists, returns epoch=0 to start fresh. 
+    If no checkpoint exists, returns epoch=0 to start fresh.
     If a checkpoint exists with epoch=N, returns epoch=N+1 to resume from the next epoch.
     """
     path = Path(path)
-    if not path.exists(): 
+    if not path.exists():
         logger.warning(f"Checkpoint not found: {path}")
         return {"epoch": 0, "step": 0, "resumed": False}
-    
-    map_location = device if device else "cpu"
-    checkpoint = torch.load(path,map_location=map_location, weights_only=False)
 
-    # Handle compiled model state dicts 
+    map_location = device if device else "cpu"
+    checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+
+    # Handle compiled model state dicts
     state_dict = checkpoint.get("model_state_dict", {})
-    state_dict = {k.replace("_orig_mod.",""): v for k,v in state_dict.items()}
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
 
     model.load_state_dict(state_dict, strict=strict)
     logger.info(f"Loaded model state from: {path}")
@@ -223,53 +222,54 @@ def load_checkpoint(
         logger.info("Restored scaler state")
 
     return {
-        "epoch": checkpoint.get("epoch",0) + 1, # Resume from next epoch 
+        "epoch": checkpoint.get("epoch", 0) + 1,  # Resume from next epoch
         "step": checkpoint.get("step", 0),
         "resumed": True,
         **{
             k: v
             for k, v in checkpoint.items()
-            if k 
+            if k
             not in [
                 "model_state_dict",
                 "optimizer_state_dict",
                 "scheduler_state_dict",
                 "scaler_state_dict",
                 "epoch",
-                "step"
+                "step",
             ]
-        }
+        },
     }
 
+
 def load_config(
-        config_path: Union[str,Path],
-        cli_overrides: Optional[Dict[str,Any]] = None,
-        quiet: bool = False 
+    config_path: Union[str, Path],
+    cli_overrides: Optional[Dict[str, Any]] = None,
+    quiet: bool = False,
 ) -> DictConfig:
     """Load YAML config with optional dot-notation overrides (e.g. 'model.lr': 0.001)."""
     config_path = Path(config_path)
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    
+
     cfg = OmegaConf.load(config_path)
     if not quiet:
         logger.info(f"Loaded config from {config_path}")
 
     if cli_overrides:
-        # Convert dot notation to nested dict 
+        # Convert dot notation to nested dict
         override_dict = {}
         for key, value in cli_overrides.items():
             keys = key.split(".")
             current = override_dict
             for k in keys[:-1]:
-                current = current.setdefault(k,{})
-            current[keys[-1]] = value 
+                current = current.setdefault(k, {})
+            current[keys[-1]] = value
 
         cfg = OmegaConf.merge(cfg, OmegaConf.create(override_dict))
         if not quiet:
             logger.info(f"Applied {len(cli_overrides)} config overrides")
 
-    return cfg 
+    return cfg
 
 
 def get_checkpoints_dir() -> Path:
@@ -278,12 +278,12 @@ def get_checkpoints_dir() -> Path:
 
 
 def get_unified_experiment_dir(
-        example_name: str,
-        sweep_name: str,
-        exp_name: str,
-        seed: int,
-        base_dir: Union[str, Path, None] = None,
-        create: bool = True,
+    example_name: str,
+    sweep_name: str,
+    exp_name: str,
+    seed: int,
+    base_dir: Union[str, Path, None] = None,
+    create: bool = True,
 ) -> Path:
     """Create experiment dir: {base_dir}/{example_name}/{sweep_name}/{exp_name}_seed{seed}."""
     if base_dir is None:
@@ -295,9 +295,10 @@ def get_unified_experiment_dir(
     ).absolute()
 
     if create:
-        exp_dir.mkdir(parents=True,exist_ok=True)
+        exp_dir.mkdir(parents=True, exist_ok=True)
 
     return exp_dir
+
 
 def get_exp_name(example_name: str, cfg) -> str:
     """Get short experiment name encoding key hyperparameters (seed appended separately)."""
@@ -308,7 +309,7 @@ def get_exp_name(example_name: str, cfg) -> str:
             cfg.loss.type,
             proj,
             f"bs{cfg.data.batch_size}",
-            f"ep{cfg.optim.epochs}"
+            f"ep{cfg.optim.epochs}",
         ]
         if cfg.model.use_projector:
             parts.append(f"ph{cfg.model.proj_hidden_dim}")
@@ -340,7 +341,8 @@ def get_exp_name(example_name: str, cfg) -> str:
         )
     else:
         return "exp"
-    
+
+
 def format_metrics(metrics: Dict[str, float], precision: int = 4) -> str:
     """Format metrics dict as 'loss=0.1234 | acc=95.12'."""
     parts = []
@@ -353,17 +355,17 @@ def format_metrics(metrics: Dict[str, float], precision: int = 4) -> str:
 
 
 def log_epoch(
-        epoch: int,
-        metrics: Dict[str, float],
-        total_epochs: Optional[int] = None,
-        elapsed_time: Optional[float] = None,
+    epoch: int,
+    metrics: Dict[str, float],
+    total_epochs: Optional[int] = None,
+    elapsed_time: Optional[float] = None,
 ) -> None:
     """Log epoch summary: 📊 [Epoch 001/100] metrics1-val1 | metric2=val2 | time=123.4s."""
     if total_epochs:
         prefix = f"[Epoch {epoch:03d}/{total_epochs}]"
     else:
         prefix = f"[Epoch {epoch:03d}]"
-    
+
     metrics_str = format_metrics(metrics)
 
     if elapsed_time is not None:
@@ -371,20 +373,21 @@ def log_epoch(
     else:
         logger.info(f"📊 {prefix} {metrics_str}")
 
+
 def log_model_info(model: nn.Module, param_counts: Dict[str, int]) -> None:
     """Log model structure and parameter counts"""
     logger.info(f"🧠 Model:\n{model}")
-    param_str = " | ".join(f"{k}={v:,}" for k,v in param_counts.items())
+    param_str = " | ".join(f"{k}={v:,}" for k, v in param_counts.items())
     logger.info(f"🔢 Parameters: {param_str}")
 
 
 def log_data_info(
-        dataset_name: str,
-        num_batches: int,
-        batch_size: int,
-        train_samples: Optional[int] = None,
-        val_samples: Optional[int] = None
-) -> None: 
+    dataset_name: str,
+    num_batches: int,
+    batch_size: int,
+    train_samples: Optional[int] = None,
+    val_samples: Optional[int] = None,
+) -> None:
     """Log dataset information."""
     if train_samples is not None and val_samples is not None:
         logger.info(
@@ -396,7 +399,8 @@ def log_data_info(
             f"📦 Data: {dataset_name} | {num_batches} batches x {batch_size} samples"
         )
 
-def log_config(cfg: Union[Dict,DictConfig], title: str = "Run Configuration") -> None:
+
+def log_config(cfg: Union[Dict, DictConfig], title: str = "Run Configuration") -> None:
     """Log configuration in a readable format."""
     logger.info("=" * 60)
     logger.info(f"⚙️  {title}:")
@@ -406,7 +410,7 @@ def log_config(cfg: Union[Dict,DictConfig], title: str = "Run Configuration") ->
         cfg = OmegaConf.to_container(cfg, resolve=True)
 
     for section, values in cfg.items():
-        if isinstance(values,dict):
+        if isinstance(values, dict):
             for key, value in values.items():
                 logger.info(f"  {section}.{key}={value}")
         else:
