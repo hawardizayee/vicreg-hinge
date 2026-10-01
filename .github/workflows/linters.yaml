@@ -1,20 +1,16 @@
-name: Lint (Common Code)
+name: Lint
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'eb_jepa/**'
       - 'examples/**'
-      - 'tests/'
   pull_request:
     branches:
       - main
     paths:
-      - 'eb_jepa/**'
       - 'examples/**'
-      - 'tests/'
 
 jobs:
   run-linters:
@@ -32,7 +28,7 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Set lint paths
-        run: echo "lint_paths=eb_jepa examples tests" >> "$GITHUB_ENV"
+        run: echo "lint_paths=examples" >> "$GITHUB_ENV"
       - name: Run isort
         run: |
           uv run python -m isort $lint_paths --check
