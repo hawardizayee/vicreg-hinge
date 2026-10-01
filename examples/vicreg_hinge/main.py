@@ -11,7 +11,7 @@ from engine import train_epoch
 from eval import LinearProbe, evaluate_linear_probe
 from lars import LARS
 from log_utils import get_logger
-from losses import BCS, VICRegLoss
+from losses import VICRegLoss
 from model import ImageSSL, ResNet18
 from omegaconf import OmegaConf
 from scheduler import WarmupCosineScheduler
@@ -46,7 +46,7 @@ DATASETS = {
 
 def run(fname: str = "cfgs/default.yaml", cfg=None, folder=None, **overrides):
     """
-    Train an Image JEPA (VICReg/BCS) model on CIFAR-10 or CIFAR-100
+    Train an Image JEPA (VICReg) model on CIFAR-10 or CIFAR-100
 
     Args:
         fname: Path to YAML config file
@@ -95,14 +95,12 @@ def run(fname: str = "cfgs/default.yaml", cfg=None, folder=None, **overrides):
         tags=["image_jepa", f"seed_{cfg.meta.seed}"],
         group=cfg.logging.get("wandb_group"),
         enabled=cfg.logging.log_wandb,
-        sweep_id=cfg.logging.get("wandb_sweep_id"),
     )
 
     dataset_cls, dataset_name, num_classes = DATASETS[cfg.data.dataset]
     logger.info(f"Loading {dataset_name} dataset")
     transform = get_train_transforms(cfg.data.dataset)
 
-    # Use EBJEPA_DSETS environment variable if set, otherwise fall back to config
     data_dir = os.environ.get("EBJEPA_DSETS")
     logger.info(f"Using data directory: {data_dir}")
 
@@ -232,14 +230,11 @@ def run(fname: str = "cfgs/default.yaml", cfg=None, folder=None, **overrides):
     )
 
     # Initialize loss function
-    if cfg.loss.type == "vicreg":
-        loss_fn = VICRegLoss(
-            hinge=cfg.loss.hinge,
-            hinge_coeff=cfg.loss.hinge_coeff,
-            cov_coeff=cfg.loss.cov_coeff,
-        )
-    elif cfg.loss.type == "bcs":
-        loss_fn = BCS(lmbd=cfg.loss.lmbd)
+    loss_fn = VICRegLoss(
+        hinge=cfg.loss.hinge,
+        hinge_coeff=cfg.loss.hinge_coeff,
+        cov_coeff=cfg.loss.cov_coeff,
+    )
 
     # Load checkpoint if requested
     start_epoch = 0

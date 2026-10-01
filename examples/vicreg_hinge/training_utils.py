@@ -43,7 +43,6 @@ def setup_wandb(
     tags: Optional[List[str]] = None,
     group: Optional[str] = None,
     enabled: bool = True,
-    sweep_id: Optional[str] = None,
 ):
     """Initialize W&B with safe resume (preserves existing run metadata on resume)."""
     # Respect WANDB_DISABLED environment variable (used by wandb itself)
@@ -65,39 +64,10 @@ def setup_wandb(
     if isinstance(config, DictConfig):
         config = OmegaConf.to_container(config, resolve=True)
 
-    # Handle wandb sweep registration via environment variables
-    # This is how wandb associates runs with sweeps
-    if sweep_id:
-        os.environ["WANDB_SWEEP_ID"] = sweep_id
-        logger.info(f"Registering run with wandb sweep: {sweep_id}")
-        if tags:
-            tags = list(tags) + [f"sweep_{sweep_id}"]
-        else:
-            tags = [f"sweep_{sweep_id}"]
-
     # Check if we should resume an existing run
     if resume and run_id_file.exists():
         with open(run_id_file, "r") as f:
             existing_run_id = f.read().strip()
-
-        # For sweep runs, use environment variables for resume
-        if sweep_id:
-            os.environ["WANDB_RUN_ID"] = existing_run_id
-            os.environ["WANDB_RESUME"] = "allow"
-            wandb_config = {
-                "project": project,
-                "dir": str(run_dir),
-                "config": config,
-            }
-            if run_name:
-                wandb_config["name"] = run_name
-            if tags:
-                wandb_config["tags"] = tags
-            if group:
-                wandb_config["group"] = group
-            run = wandb.init(**wandb_config)
-            logger.info(f"Resumed W&B run: {existing_run_id} in sweep {sweep_id}")
-            return run
 
         # SAFE RESUME: Only pass id and resume flag - do NOT pass name/config/tags
         # This prevents overwriting existing run metadata on W&B
@@ -314,31 +284,13 @@ def get_exp_name(example_name: str, cfg) -> str:
         if cfg.model.use_projector:
             parts.append(f"ph{cfg.model.proj_hidden_dim}")
             parts.append(f"po{cfg.model.proj_output_dim}")
-        if cfg.loss.type == "vicreg":
-            # e.g. "std1.0" or "var0.4" -- matches the run names used in the paper
-            parts.append(f"{cfg.loss.hinge}{cfg.loss.hinge_coeff}")
-            parts.append(f"cov{cfg.loss.cov_coeff}")
-        elif cfg.loss.type == "bcs":
-            parts.append(f"lmbd{cfg.loss.lmbd}")
+        # e.g. "std1.0" or "var0.4" -- matches the run names used in the paper
+        parts.append(f"{cfg.loss.hinge}{cfg.loss.hinge_coeff}")
+        parts.append(f"cov{cfg.loss.cov_coeff}")
         # Prefix non-default datasets; CIFAR-10 names stay unchanged so they match past runs
         if cfg.data.dataset != "cifar10":
             parts.insert(0, cfg.data.dataset)
         return "_".join(str(p) for p in parts)
-    elif example_name == "video_jepa":
-        return (
-            f"resnet_bs{cfg.data.batch_size}"
-            f"_lr{cfg.optim.lr}"
-            f"_std{cfg.loss.std_coeff}"
-            f"_cov{cfg.loss.cov_coeff}"
-        )
-    elif example_name == "ac_video_jepa":
-        return (
-            f"{cfg.model.encoder_architecture}"
-            f"_cov{cfg.model.regularizer.cov_coeff}"
-            f"_std{cfg.model.regularizer.std_coeff}"
-            f"_simt{cfg.model.regularizer.get('sim_coeff_t')}"
-            f"_idm{cfg.model.regularizer.get('idm_coeff')}"
-        )
     else:
         return "exp"
 

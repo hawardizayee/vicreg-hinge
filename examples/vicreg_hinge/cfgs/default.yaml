@@ -1,4 +1,4 @@
-# Image JEPA (VICReg/BCS) Training Configuration
+# Image JEPA (VICReg) Training Configuration
 # Train a self-supervised image representation model on CIFAR-10 or CIFAR-100
 
 meta:
@@ -21,13 +21,11 @@ model:
   proj_output_dim: 1024 
 
 loss:
-  type: vicreg    # vicreg or bcs 
+  type: vicreg    # only used in the run name
   # VICReg variance term: hinge on the std (VICReg default) or on the variance
   hinge: std        # std or var
   hinge_coeff: 1.0  # weight mu of the variance term (the swept variable)
   cov_coeff: 100.0
-  # BCS loss weight (only used if type=bcs)
-  lmbd: 10.0 
 
 optim:
   epochs: 300 
@@ -49,17 +47,3 @@ logging:
 training:
   use_amp: true     # use automatic mixed precision
   dtype: bfloat16   # float16 or bfloat16
-
-
-# --- Parameters used when running with --full-sweep 
-# By default, only the parameters specified above are used 
-sweep:
-  # Default sweep grid for VICReg hyperparameter search 
-  param_grid:
-    data.batch_size: [256]
-    model.use_projector: [true, false]
-    model.proj_hidden_dim: [64, 128, 256, 512, 1024, 2048, 4096]
-    model.proj_output_dim: [64, 128, 256, 512, 1024, 2048, 4096]
-    loss.hinge_coeff: [1.0, 10.0, 100.0]
-    loss.cov_coeff: [0.1, 1.0, 10.0, 100.0]
-    meta.seed: [1, 1000, 10000]
