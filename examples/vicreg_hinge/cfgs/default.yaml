@@ -26,6 +26,7 @@ loss:
   hinge: std        # std or var
   hinge_coeff: 1.0  # weight mu of the variance term (the swept variable)
   cov_coeff: 100.0
+  eps: 1.0e-4       # constant inside the std hinge's sqrt (VICReg default); unused by the var hinge
 
 optim:
   epochs: 300 

@@ -287,6 +287,10 @@ def get_exp_name(example_name: str, cfg) -> str:
         # e.g. "std1.0" or "var0.4" -- matches the run names used in the paper
         parts.append(f"{cfg.loss.hinge}{cfg.loss.hinge_coeff}")
         parts.append(f"cov{cfg.loss.cov_coeff}")
+        # Only non-default eps is named, so default-eps names stay unchanged and match past runs
+        eps = cfg.loss.get("eps", 1e-4)
+        if eps != 1e-4:
+            parts.append(f"eps{eps}")
         # Prefix non-default datasets; CIFAR-10 names stay unchanged so they match past runs
         if cfg.data.dataset != "cifar10":
             parts.insert(0, cfg.data.dataset)

@@ -234,6 +234,7 @@ def run(fname: str = "cfgs/default.yaml", cfg=None, folder=None, **overrides):
         hinge=cfg.loss.hinge,
         hinge_coeff=cfg.loss.hinge_coeff,
         cov_coeff=cfg.loss.cov_coeff,
+        eps=cfg.loss.get("eps", 1e-4),
     )
 
     # Load checkpoint if requested

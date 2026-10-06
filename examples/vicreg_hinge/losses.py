@@ -4,16 +4,19 @@ import torch.nn.functional as F
 
 
 class HingeStdLoss(torch.nn.Module):
-    def __init__(self, std_margin: float = 1.0):
+    def __init__(self, std_margin: float = 1.0, eps: float = 1e-4):
         """
         Encourages each feature to maintain at least a minimum standard devication.
         Features with std below the margin incur a penalty of (std_margin =std).
         Args:
             std_margin (float,default=1.0):
                 Minimum desired standard deviation per feature.
+            eps (float, default=1e-4):
+                Constant added to the variance inside the square root.
         """
         super().__init__()
         self.std_margin = std_margin
+        self.eps = eps
 
     def forward(self, x: torch.Tensor):
         """
@@ -23,7 +26,7 @@ class HingeStdLoss(torch.nn.Module):
             std_loss: Scalar tensor loss on standard deviations
         """
         x = x - x.mean(dim=0, keepdim=True)
-        std = torch.sqrt(x.var(dim=0) + 0.0001)
+        std = torch.sqrt(x.var(dim=0) + self.eps)
         std_loss = torch.mean(F.relu(self.std_margin - std))
         return std_loss
 
@@ -88,13 +91,15 @@ class CovarianceLoss(torch.nn.Module):
 class VICRegLoss(nn.Module):
     """VICReg loss combining invariance, variance (std or var hinge), and covariance terms."""
 
-    def __init__(self, hinge="std", hinge_coeff=1.0, cov_coeff=1.0):
+    def __init__(self, hinge="std", hinge_coeff=1.0, cov_coeff=1.0, eps=1e-4):
         super().__init__()
         if hinge not in HINGES:
             raise ValueError(f"loss.hinge must be one of {list(HINGES)}, got {hinge!r}")
         self.hinge_coeff = hinge_coeff
         self.cov_coeff = cov_coeff
-        self.hinge_loss_fn = HINGES[hinge](1.0)
+        # eps only exists in the std hinge; the var hinge has no square root
+        hinge_kwargs = {"eps": eps} if hinge == "std" else {}
+        self.hinge_loss_fn = HINGES[hinge](1.0, **hinge_kwargs)
         self.cov_loss_fn = CovarianceLoss()
 
     def forward(self, z1, z2):
