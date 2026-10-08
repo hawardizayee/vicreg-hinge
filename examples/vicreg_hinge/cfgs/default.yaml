@@ -43,7 +43,7 @@ logging:
   log_every: 10       # Log every N epochs
   save_every: 50      # Save checkpoint every N epochs 
   tqdm_silent: false  # Disable tqdm progress bars
-  save_embeddings: true  # Per-epoch monitor-batch embeddings (~0.9 GB); needed for Figs 3-5
+  save_embeddings: true  # Per-epoch monitor-batch embeddings (~0.9 GB); needed for the training-dynamics analysis
 
 training:
   use_amp: true     # use automatic mixed precision

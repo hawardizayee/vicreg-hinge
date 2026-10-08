@@ -50,7 +50,9 @@ overridden the same way. The ones that matter here:
 | `loss.hinge` | `std`, `var` | Hinge on the standard deviation or on the variance |
 | `loss.hinge_coeff` | float | Weight of the variance term |
 | `loss.cov_coeff` | float | Weight of the covariance term (default `100.0`) |
+| `loss.eps` | float | Constant inside the square root of the standard-deviation hinge (default `1.0e-4`) |
 | `data.dataset` | `cifar10`, `cifar100` | Dataset |
+| `training.use_amp` | `true`, `false` | Mixed precision (default `true`); `false` trains in full fp32 |
 | `meta.seed` | int | Random seed |
 
 Each run reports the accuracy of an online linear probe on the validation set
@@ -66,8 +68,8 @@ projector embeddings of a fixed batch at every epoch to `embedding_history.pt`
 
 This code is derived from the `image_jepa` example of
 [EB-JEPA](https://github.com/facebookresearch/eb_jepa) (Apache 2.0). We added the
-`loss.hinge` option and removed the parts of the library that this experiment does
-not use.
+`loss.hinge` and `loss.eps` options and CIFAR-100 support (`data.dataset`), and removed
+the parts of the library that this experiment does not use.
 
 ```bibtex
 @misc{terver2026lightweightlibraryenergybasedjointembedding,
